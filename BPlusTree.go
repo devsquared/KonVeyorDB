@@ -38,6 +38,44 @@ type BTree struct {
 	del   func(uint64)        // deallocate a page
 }
 
+// Interface for inserting and deleting KVs
+// TODO: could this be an interface for the DB itself?
+func (tree *BTree) Insert(key, value []byte) {
+	if tree.root == 0 { // first node not created
+		// create first node
+		root := BNode(make([]byte, BTREE_PAGE_SIZE))
+		root.setHeader(BNODE_LEAF, 2)
+		// we need a dummy key to cover the whole key space
+		// so that a lookup will always find containing node
+		// this concept is called the sentinel key
+		nodeAppendKV(root, 0, 0, nil, nil)
+		nodeAppendKV(root, 1, 0, key, value)
+		tree.root = tree.alloc(root) // actually allocate
+		return
+	}
+
+	node := treeInsert(tree, tree.get(tree.root), key, value)
+	numSplits, split := nodeSplit(node)
+	tree.del(tree.root) // deallocate old root
+	if numSplits > 1 {  // root was split, need a new level
+		root := BNode(make([]byte, BTREE_PAGE_SIZE))
+		root.setHeader(BNODE_NODE, numSplits)
+		// allocate the new splits and append KVs
+		for i, node := range split[:numSplits] {
+			pointer, key := tree.alloc(node), node.getKey(0)
+			nodeAppendKV(root, uint16(i), pointer, key, nil)
+		}
+		tree.root = tree.alloc(root) // allocate root
+	} else {
+		tree.root = tree.alloc(split[0]) // allocate root
+	}
+}
+
+func (tree *BTree) Delete(key []byte) bool {
+	//TODO: implement
+	return false
+}
+
 // Encode/Decode helpers
 // Header
 const (
