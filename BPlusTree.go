@@ -230,6 +230,14 @@ func nodeReplaceChildN(
 	nodeAppendRange(newNode, oldNode, idx+incoming, idx+1, oldNode.nkeys()-(idx+1)) // append remaining KVs after added children nodes
 }
 
+// replace 2 adjacent links with 1
+func nodeReplaceTwoChildren(new, old BNode, idx uint16, ptr uint64, key []byte) {
+	new.setHeader(BNODE_NODE, old.nkeys()-1)
+	nodeAppendRange(new, old, 0, 0, idx)
+	nodeAppendKV(new, idx, ptr, key, nil)
+	nodeAppendRange(new, old, idx+1, idx+2, old.nkeys()-(idx+2))
+}
+
 // nodeAppendKV copies a KV into the position given.
 func nodeAppendKV(newNode BNode, idx uint16, pointer uint64, key, value []byte) {
 	// set the pointers
@@ -370,4 +378,106 @@ func nodeInsert(
 	tree.del(kPtr)
 	// update links
 	nodeReplaceChildN(tree, newNode, node, idx, split[:nSplits]...)
+}
+
+// remove a key from a leaf node
+func leafDeleteKey(new, old BNode, idx uint16) {
+	new.setHeader(BNODE_LEAF, old.nkeys()-1)
+	nodeAppendRange(new, old, 0, 0, idx)
+	nodeAppendRange(new, old, idx, idx+1, old.nkeys()-(idx+1))
+}
+
+// merge 2 nodes into 1
+func nodeMerge(new, left, right BNode) {
+	new.setHeader(left.btype(), left.nkeys()+right.nkeys())     // create with enough space for combined keyspace of right and left
+	nodeAppendRange(new, left, 0, 0, left.nkeys())              // append up to left.nkeys()
+	nodeAppendRange(new, right, left.nkeys(), 0, right.nkeys()) // append after left.nkeys()
+}
+
+// delete a key from the tree
+func treeDelete(tree *BTree, node BNode, key []byte) BNode {
+	// look up key
+	idx := nodeLookupLE(node, key)
+	// act depending on the node type
+	switch node.btype() {
+	case BNODE_LEAF:
+		if !bytes.Equal(key, node.getKey(idx)) {
+			return BNode{} // not found
+		}
+		// delete the key in the leaf node
+		new := BNode(make([]byte, BTREE_PAGE_SIZE))
+		leafDeleteKey(new, node, idx)
+		return new
+	case BNODE_NODE:
+		return nodeDelete(tree, node, idx, key)
+	default:
+		panic("unknown node type: bad node")
+	}
+}
+
+// delete a key from a BNODE_NODE type node
+func nodeDelete(tree *BTree, node BNode, idx uint16, key []byte) BNode {
+	// recurse into the child
+	kptr := node.getPointer(idx)
+	updated := treeDelete(tree, tree.get(kptr), key)
+	if len(updated) == 0 {
+		return BNode{} // not found
+	}
+	tree.del(kptr) // deallocate the pointer
+
+	new := BNode(make([]byte, BTREE_PAGE_SIZE))
+	// check for needed merging
+	mergeDirection, sibling := shouldMerge(tree, node, idx, updated)
+	switch {
+	case mergeDirection < 0: // left
+		merged := BNode(make([]byte, BTREE_PAGE_SIZE))
+		nodeMerge(merged, sibling, updated)
+		tree.del(node.getPointer(idx - 1))
+		nodeReplaceTwoChildren(new, node, idx-1, tree.alloc(merged), merged.getKey(0))
+	case mergeDirection > 0: // right
+		merged := BNode(make([]byte, BTREE_PAGE_SIZE))
+		nodeMerge(merged, updated, sibling)
+		tree.del(node.getPointer(idx + 1))
+		nodeReplaceTwoChildren(new, node, idx, tree.alloc(merged), merged.getKey(0))
+	case mergeDirection == 0 && updated.nkeys() == 0:
+		assert(node.nkeys() == 1 && idx == 0, "empty child but no sibling")
+		new.setHeader(BNODE_NODE, 0) // make parent empty as well
+	case mergeDirection == 0 && updated.nkeys() > 0:
+		nodeReplaceChildN(tree, new, node, idx, updated)
+	}
+
+	return new
+}
+
+// decides if the updated child should be merged with a sibling. Three outcomes:
+//   - 1, right sibling
+//   - 0, empty BNode
+//   - -1, left sibling
+//
+// Deleted keys are unused space within the nodes. In bad cases, mostly empty trees can keep a large number of nodes.
+// To clean this up, we set a threshold of BTREE_PAGE_SIZE/4 to trigger merges earlier.
+//
+// TODO: enumerate these returns to make this cleaner
+func shouldMerge(tree *BTree, node BNode, idx uint16, updated BNode) (int, BNode) {
+	if updated.nBytes() > BTREE_PAGE_SIZE/4 { // updated is too large and cannot be merged
+		return 0, BNode{}
+	}
+
+	if idx > 0 {
+		sibling := BNode(tree.get(node.getPointer(idx - 1)))
+		merged := sibling.nBytes() + updated.nBytes() - HEADER
+		if merged <= BTREE_PAGE_SIZE { // ensure that we are below the page limit
+			return -1, sibling // left
+		}
+	}
+
+	if idx+1 < node.nkeys() {
+		sibling := BNode(tree.get(node.getPointer(idx + 1)))
+		merged := sibling.nBytes() + updated.nBytes() - HEADER
+		if merged <= BTREE_PAGE_SIZE { // ensure that we are below the page limit
+			return 1, sibling // right
+		}
+	}
+
+	return 0, BNode{}
 }
