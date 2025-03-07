@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 )
 
@@ -39,8 +40,11 @@ type BTree struct {
 }
 
 // Interface for inserting and deleting KVs
-// TODO: could this be an interface for the DB itself?
-func (tree *BTree) Insert(key, value []byte) {
+func (tree *BTree) Insert(key, value []byte) error {
+	if err := checkLimit(key, value); err != nil {
+		return err // the only way for an update to fail
+	}
+
 	if tree.root == 0 { // first node not created
 		// create first node
 		root := BNode(make([]byte, BTREE_PAGE_SIZE))
@@ -51,7 +55,7 @@ func (tree *BTree) Insert(key, value []byte) {
 		nodeAppendKV(root, 0, 0, nil, nil)
 		nodeAppendKV(root, 1, 0, key, value)
 		tree.root = tree.alloc(root) // actually allocate
-		return
+		return nil
 	}
 
 	node := treeInsert(tree, tree.get(tree.root), key, value)
@@ -69,11 +73,46 @@ func (tree *BTree) Insert(key, value []byte) {
 	} else {
 		tree.root = tree.alloc(split[0]) // allocate root
 	}
+
+	return nil
 }
 
-func (tree *BTree) Delete(key []byte) bool {
-	//TODO: implement
-	return false
+func (tree *BTree) Delete(key []byte) (bool, error) {
+	if err := checkLimit(key, nil); err != nil {
+		return false, err // the only way for an update to fail
+	}
+
+	if tree.root == 0 {
+		return false, nil
+	}
+
+	updated := treeDelete(tree, tree.get(tree.root), key)
+	if len(updated) == 0 {
+		return false, nil // not found
+	}
+
+	tree.del(tree.root)
+	if updated.btype() == BNODE_NODE && updated.nkeys() == 1 {
+		// remove a level
+		tree.root = updated.getPointer(0)
+	} else {
+		tree.root = tree.alloc(updated)
+	}
+	return true, nil
+}
+
+// TODO: make these errors top level
+func checkLimit(key []byte, val []byte) error {
+	if len(key) == 0 {
+		return errors.New("empty key") // used as a dummy key
+	}
+	if len(key) > BTREE_MAX_KEY_SIZE {
+		return errors.New("key too long")
+	}
+	if len(val) > BTREE_MAX_VAL_SIZE {
+		return errors.New("value too long")
+	}
+	return nil
 }
 
 // Encode/Decode helpers
