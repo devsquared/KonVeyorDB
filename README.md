@@ -1,7 +1,7 @@
 # KonVeyorDB
 Simple Relational KV DB built in go. 
 
-- at chapter 5.4
+- at chapter 6
 
 ## Book
 Working from the "Build-your-own" series. See [here](https://build-your-own.org/).

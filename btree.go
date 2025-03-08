@@ -144,8 +144,8 @@ func (node BNode) getPointer(idx uint16) uint64 {
 
 func (node BNode) setPointer(idx uint16, val uint64) {
 	assert(idx < node.nkeys(), fmt.Sprintf("index of node out of range: %d > %d", idx, node.nkeys()))
-	assert(node.btype() == BNODE_LEAF || val != 0, fmt.Sprintf("value empty for leaf node"))
-	assert(node.btype() == BNODE_NODE || val == 0, fmt.Sprintf("value non-empty for internal node"))
+	assert(node.btype() == BNODE_LEAF || val != 0, "value empty for leaf node")
+	assert(node.btype() == BNODE_NODE || val == 0, "value non-empty for internal node")
 	pos := HEADER + 8*idx // calc position by offset
 	binary.LittleEndian.PutUint64(node[pos:], val)
 }
@@ -155,7 +155,7 @@ func (node BNode) setPointer(idx uint16, val uint64) {
 // offsetPos is a helper to find the nth KV pair (as defined by the index) in our offset list.
 func offsetPos(node BNode, idx uint16) uint16 {
 	// NOTE: first KV is at 0 so we use the end offset for that which is the start offset for next KV
-	assert(1 <= idx && idx <= node.nkeys(), fmt.Sprintf("index out of range"))
+	assert(1 <= idx && idx <= node.nkeys(), "index out of range")
 	return HEADER + 8*node.nkeys() + 2*(idx-1)
 }
 
@@ -174,13 +174,13 @@ func (node BNode) setOffset(idx, offset uint16) {
 // KVs
 // kvPos gives the position of a KV based on index relative to whole node.
 func (node BNode) kvPos(idx uint16) uint16 {
-	assert(idx <= node.nkeys(), fmt.Sprintf("index out of bounds"))
+	assert(idx <= node.nkeys(), "index out of bounds")
 	return HEADER + 8*node.nkeys() + 2*node.nkeys() + node.getOffset(idx)
 }
 
 // getKey gives the byte value of the key at the given index.
 func (node BNode) getKey(idx uint16) []byte {
-	assert(idx <= node.nkeys(), fmt.Sprintf("index out of bounds"))
+	assert(idx <= node.nkeys(), "index out of bounds")
 	pos := node.kvPos(idx)
 	kLen := binary.LittleEndian.Uint16(node[pos:])
 	return node[pos+4:][:kLen]
@@ -188,7 +188,7 @@ func (node BNode) getKey(idx uint16) []byte {
 
 // getValue gives the byte value of the value at the given index.
 func (node BNode) getValue(idx uint16) []byte {
-	assert(idx <= node.nkeys(), fmt.Sprintf("index out of bounds"))
+	assert(idx <= node.nkeys(), "index out of bounds")
 	pos := node.kvPos(idx)                             // position in node
 	kLen := binary.LittleEndian.Uint16(node[pos:])     // key length
 	valLen := binary.LittleEndian.Uint16(node[pos+2:]) // val length
@@ -293,8 +293,8 @@ func nodeAppendKV(newNode BNode, idx uint16, pointer uint64, key, value []byte) 
 
 // nodeAppendRange copies the KVs into a range of n from the oldNode into the new based on newDest.
 func nodeAppendRange(newNode, oldNode BNode, newDest, oldSrc, n uint16) {
-	assert(oldSrc+n <= oldNode.nkeys(), fmt.Sprintf("node too small to copy KVs"))
-	assert(newDest+n <= newNode.nkeys(), fmt.Sprintf("node too small to copy KVs"))
+	assert(oldSrc+n <= oldNode.nkeys(), "node too small to copy KVs")
+	assert(newDest+n <= newNode.nkeys(), "node too small to copy KVs")
 	if n == 0 { // nothing to do here
 		return
 	}
@@ -318,7 +318,7 @@ func nodeAppendRange(newNode, oldNode BNode, newDest, oldSrc, n uint16) {
 
 // nodeBisect splits a bigger-than-allowed node in two. The second node always fits on a page.
 func nodeBisect(left, right, old BNode) {
-	assert(old.nkeys() >= 2, fmt.Sprintf("old node has more than 2 keys - cannot bisect"))
+	assert(old.nkeys() >= 2, "old node has more than 2 keys - cannot bisect")
 
 	// start with initial guess
 	nLeft := old.nkeys() / 2 // naiive direct split in two
@@ -330,7 +330,7 @@ func nodeBisect(left, right, old BNode) {
 	for leftBytes() > BTREE_PAGE_SIZE {
 		nLeft--
 	}
-	assert(nLeft >= 1, fmt.Sprintf("split resulted in empty node"))
+	assert(nLeft >= 1, "split resulted in empty node")
 
 	// try to fit right half
 	rightBytes := func() uint16 {
@@ -339,7 +339,7 @@ func nodeBisect(left, right, old BNode) {
 	for rightBytes() > BTREE_PAGE_SIZE {
 		nLeft++
 	}
-	assert(nLeft < old.nkeys(), fmt.Sprintf("old node unchanged by split"))
+	assert(nLeft < old.nkeys(), "old node unchanged by split")
 	nRight := old.nkeys() - nLeft // calc right side off of left
 
 	left.setHeader(old.btype(), nLeft)
@@ -347,7 +347,7 @@ func nodeBisect(left, right, old BNode) {
 	nodeAppendRange(left, old, 0, 0, nLeft)
 	nodeAppendRange(right, old, 0, nLeft, nRight)
 	// left half still could be too big
-	assert(right.nBytes() <= BTREE_PAGE_SIZE, fmt.Sprintf("resulting tight node of split is too large")) // we know that right side should always be less than a page
+	assert(right.nBytes() <= BTREE_PAGE_SIZE, "resulting tight node of split is too large") // we know that right side should always be less than a page
 }
 
 // nodeSplit accepts a node with 3 outcomes:
@@ -372,7 +372,7 @@ func nodeSplit(old BNode) (uint16, [3]BNode) { //TODO: the return here could be 
 	leftLeft := BNode(make([]byte, BTREE_PAGE_SIZE))
 	middle := BNode(make([]byte, BTREE_PAGE_SIZE))
 	nodeBisect(leftLeft, middle, left)
-	assert(leftLeft.nBytes() <= BTREE_PAGE_SIZE, fmt.Sprintf("resulting split is still too big"))
+	assert(leftLeft.nBytes() <= BTREE_PAGE_SIZE, "resulting split is still too big")
 	return 3, [3]BNode{leftLeft, middle, right}
 }
 
