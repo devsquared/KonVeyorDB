@@ -1,6 +1,8 @@
 # KonVeyorDB
 Simple Relational KV DB built in go. 
 
+NOTE: this code only works on unix based machines. will not compile on windows machines
+
 - at chapter 6
 
 ## Book

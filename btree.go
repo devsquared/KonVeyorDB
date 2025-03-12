@@ -520,3 +520,26 @@ func shouldMerge(tree *BTree, node BNode, idx uint16, updated BNode) (int, BNode
 
 	return 0, BNode{}
 }
+
+func nodeGetKey(tree *BTree, node BNode, key []byte) ([]byte, bool) {
+	idx := nodeLookupLE(node, key)
+	switch node.btype() {
+	case BNODE_LEAF:
+		if bytes.Equal(key, node.getKey(idx)) {
+			return node.getValue(idx), true
+		} else {
+			return nil, false
+		}
+	case BNODE_NODE:
+		return nodeGetKey(tree, tree.get(node.getPointer(idx)), key)
+	default:
+		panic("bad node!")
+	}
+}
+
+func (tree *BTree) Get(key []byte) ([]byte, bool) {
+	if tree.root == 0 {
+		return nil, false
+	}
+	return nodeGetKey(tree, tree.get(tree.root), key)
+}
