@@ -3,7 +3,7 @@ Simple Relational KV DB built in go.
 
 NOTE: this code only works on unix based machines. will not compile on windows machines
 
-- at chapter 6
+- at chapter 6.6
 
 ## Book
 Working from the "Build-your-own" series. See [here](https://build-your-own.org/).

@@ -1,6 +1,9 @@
 package main
 
 import (
+	"bytes"
+	"encoding/binary"
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -58,6 +61,58 @@ func (db *KVStore) Open() error {
 fail:
 	db.Close()
 	return fmt.Errorf("KV.Open: %w", err)
+}
+
+// Magic number used for signature on files
+const DB_SIG = "BuildYourOwnDB06"
+
+// the 1st page stores the root pointer and other auxiliary data.
+// | sig | root_ptr | page_used |
+// | 16B |    8B    |     8B    |
+func loadMeta(db *KVStore, data []byte) {
+	db.tree.root = binary.LittleEndian.Uint64(data[16:])
+	db.page.flushed = binary.LittleEndian.Uint64(data[24:])
+}
+
+func saveMeta(db *KVStore) []byte {
+	var data [32]byte
+	copy(data[:16], []byte(DB_SIG))
+	binary.LittleEndian.PutUint64(data[16:], db.tree.root)
+	binary.LittleEndian.PutUint64(data[24:], db.page.flushed)
+	return data[:]
+}
+
+func readRoot(db *KVStore, fileSize int64) error {
+	if fileSize%BTREE_PAGE_SIZE != 0 {
+		return errors.New("file is not a multiple of pages")
+	}
+	if fileSize == 0 { // empty file
+		db.page.flushed = 1 // the meta page is initialized on the 1st write
+		return nil
+	}
+	// read the page
+	data := db.mmap.chunks[0]
+	loadMeta(db, data)
+	// verify the page
+	bad := !bytes.Equal([]byte(DB_SIG), data[:16])
+	// pointers are within range?
+	maxpages := uint64(fileSize / BTREE_PAGE_SIZE)
+	bad = bad || !(0 < db.page.flushed && db.page.flushed <= maxpages)
+	bad = bad || !(0 < db.tree.root && db.tree.root < db.page.flushed)
+	if bad {
+		return errors.New("bad meta page")
+	}
+	return nil
+}
+
+// update the meta page. it must be atomic.
+func updateRoot(db *KVStore) error {
+	// NOTE: _likely_ power-loss atomic at the hardware level.
+	// Similarly handled in Postgres: https://www.postgresql.org/message-id/flat/17064-bb0d7904ef72add3%40postgresql.org
+	if _, err := syscall.Pwrite(db.fd, saveMeta(db), 0); err != nil {
+		return fmt.Errorf("write meta page: %w", err)
+	}
+	return nil
 }
 
 // open or create a file and fsync the directory
